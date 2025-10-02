@@ -1,0 +1,619 @@
+openapi: 3.0.3
+info:
+  title: Social Media Marketing Dashboard API
+  description: API for managing product briefs, assets, creative ideas, and social media content generation
+  version: 1.0.0
+servers:
+  - url: http://localhost:8002
+    description: Local development server
+
+paths:
+  /briefs:
+    get:
+      summary: List all product briefs
+      operationId: listBriefs
+      responses:
+        '200':
+          description: List of briefs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Brief'
+    
+    post:
+      summary: Create a new product brief
+      operationId: createBrief
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                  description: Brief text content (if not uploading file)
+                file:
+                  type: string
+                  format: binary
+                  description: Brief document file (TXT, PDF, or DOCX)
+                campaign_message:
+                  type: string
+                  description: Campaign message to include in creatives
+                regions:
+                  type: string
+                  description: JSON array of target regions
+                demographics:
+                  type: string
+                  description: JSON array of target demographics
+              required:
+                - campaign_message
+                - regions
+                - demographics
+      responses:
+        '201':
+          description: Brief created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Brief'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /briefs/{brief_id}:
+    get:
+      summary: Get a specific brief
+      operationId: getBrief
+      parameters:
+        - $ref: '#/components/parameters/BriefId'
+      responses:
+        '200':
+          description: Brief details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Brief'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    delete:
+      summary: Delete a brief
+      operationId: deleteBrief
+      parameters:
+        - $ref: '#/components/parameters/BriefId'
+      responses:
+        '204':
+          description: Brief deleted successfully
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /briefs/{brief_id}/execute:
+    post:
+      summary: Execute brief to generate creative ideas
+      operationId: executeBrief
+      parameters:
+        - $ref: '#/components/parameters/BriefId'
+      responses:
+        '200':
+          description: Ideas generated successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Idea'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /assets/brand:
+    post:
+      summary: Upload brand asset (logo, style elements)
+      operationId: uploadBrandAsset
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+      responses:
+        '201':
+          description: Brand asset uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /assets/product:
+    post:
+      summary: Upload product asset (product image)
+      operationId: uploadProductAsset
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+      responses:
+        '201':
+          description: Product asset uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /assets:
+    get:
+      summary: List all assets
+      operationId: listAssets
+      parameters:
+        - name: asset_type
+          in: query
+          schema:
+            type: string
+            enum: [brand, product]
+          description: Filter by asset type
+      responses:
+        '200':
+          description: List of assets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Asset'
+
+  /assets/{asset_id}:
+    delete:
+      summary: Delete an asset
+      operationId: deleteAsset
+      parameters:
+        - $ref: '#/components/parameters/AssetId'
+      responses:
+        '204':
+          description: Asset deleted successfully
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ideas/{idea_id}:
+    get:
+      summary: Get a specific idea
+      operationId: getIdea
+      parameters:
+        - $ref: '#/components/parameters/IdeaId'
+      responses:
+        '200':
+          description: Idea details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Idea'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ideas/{idea_id}/regenerate:
+    post:
+      summary: Regenerate a new idea to replace current one
+      operationId: regenerateIdea
+      parameters:
+        - $ref: '#/components/parameters/IdeaId'
+      responses:
+        '200':
+          description: New idea generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Idea'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /ideas/{idea_id}/generate-creative:
+    post:
+      summary: Generate final creative using Adobe Firefly
+      operationId: generateCreative
+      parameters:
+        - $ref: '#/components/parameters/IdeaId'
+      responses:
+        '201':
+          description: Creative generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creative'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /creatives:
+    get:
+      summary: List all creatives
+      operationId: listCreatives
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, deployed]
+          description: Filter by approval/deployment status
+      responses:
+        '200':
+          description: List of creatives with approval status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CreativeWithApproval'
+
+  /creatives/{creative_id}:
+    get:
+      summary: Get a specific creative
+      operationId: getCreative
+      parameters:
+        - $ref: '#/components/parameters/CreativeId'
+      responses:
+        '200':
+          description: Creative details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreativeWithApproval'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /creatives/{creative_id}/regenerate:
+    post:
+      summary: Regenerate creative with Adobe Firefly
+      operationId: regenerateCreative
+      parameters:
+        - $ref: '#/components/parameters/CreativeId'
+      responses:
+        '200':
+          description: Creative regenerated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Creative'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /creatives/{creative_id}/approve-creative:
+    post:
+      summary: Grant creative approval
+      operationId: approveCreative
+      parameters:
+        - $ref: '#/components/parameters/CreativeId'
+      responses:
+        '200':
+          description: Creative approval granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /creatives/{creative_id}/approve-regional:
+    post:
+      summary: Grant regional approval
+      operationId: approveRegional
+      parameters:
+        - $ref: '#/components/parameters/CreativeId'
+      responses:
+        '200':
+          description: Regional approval granted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /creatives/{creative_id}/deploy:
+    post:
+      summary: Deploy creative (requires both approvals)
+      operationId: deployCreative
+      parameters:
+        - $ref: '#/components/parameters/CreativeId'
+      responses:
+        '200':
+          description: Creative deployed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        '400':
+          description: Cannot deploy without both approvals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  parameters:
+    BriefId:
+      name: brief_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    
+    AssetId:
+      name: asset_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    
+    IdeaId:
+      name: idea_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    
+    CreativeId:
+      name: creative_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Brief:
+      type: object
+      required:
+        - id
+        - content
+        - campaign_message
+        - regions
+        - demographics
+        - source_type
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        content:
+          type: string
+        campaign_message:
+          type: string
+        regions:
+          type: array
+          items:
+            type: string
+        demographics:
+          type: array
+          items:
+            type: string
+        source_type:
+          type: string
+          enum: [text, txt, pdf, docx]
+        source_filename:
+          type: string
+          nullable: true
+        source_path:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Asset:
+      type: object
+      required:
+        - id
+        - asset_type
+        - filename
+        - file_path
+        - mime_type
+        - file_size
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        asset_type:
+          type: string
+          enum: [brand, product]
+        filename:
+          type: string
+        file_path:
+          type: string
+        mime_type:
+          type: string
+        file_size:
+          type: integer
+        brand_colors:
+          type: array
+          items:
+            type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    Idea:
+      type: object
+      required:
+        - id
+        - brief_id
+        - region
+        - demographic
+        - content
+        - language_code
+        - generation_count
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        brief_id:
+          type: string
+          format: uuid
+        region:
+          type: string
+        demographic:
+          type: string
+        content:
+          type: string
+        language_code:
+          type: string
+        generation_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Creative:
+      type: object
+      required:
+        - id
+        - idea_id
+        - file_path
+        - mime_type
+        - file_size
+        - generation_count
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        idea_id:
+          type: string
+          format: uuid
+        file_path:
+          type: string
+        mime_type:
+          type: string
+        file_size:
+          type: integer
+        firefly_job_id:
+          type: string
+          nullable: true
+        generation_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Approval:
+      type: object
+      required:
+        - id
+        - creative_id
+        - creative_approved
+        - regional_approved
+        - deployed
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        creative_id:
+          type: string
+          format: uuid
+        creative_approved:
+          type: boolean
+        creative_approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        regional_approved:
+          type: boolean
+        regional_approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        deployed:
+          type: boolean
+        deployed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreativeWithApproval:
+      allOf:
+        - $ref: '#/components/schemas/Creative'
+        - type: object
+          properties:
+            approval:
+              $ref: '#/components/schemas/Approval'
+
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        detail:
+          type: string
+          nullable: true
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    ServerError:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
