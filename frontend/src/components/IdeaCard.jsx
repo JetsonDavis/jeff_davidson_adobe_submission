@@ -4,8 +4,10 @@ import { RefreshCw, Play, Trash2, Loader2 } from 'lucide-react';
 export default function IdeaCard({ idea, onRegenerate, onGenerateCreative, onDelete }) {
   const [loading, setLoading] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [generatingCreatives, setGeneratingCreatives] = useState(false);
+  const [creativePlaceholders, setCreativePlaceholders] = useState([]);
   
-  console.log('IdeaCard render - regenerating:', regenerating, 'loading:', loading);
+  console.log('IdeaCard render - regenerating:', regenerating, 'loading:', loading, 'generatingCreatives:', generatingCreatives, 'placeholders:', creativePlaceholders.length);
 
   const handleDelete = async () => {
     if (!confirm('Delete this idea?')) return;
@@ -43,55 +45,118 @@ export default function IdeaCard({ idea, onRegenerate, onGenerateCreative, onDel
       console.error('Failed to regenerate:', err);
       await minDelay; // Still wait even on error
       alert('Failed to generate new idea');
-    } finally {
       setRegenerating(false);
     }
   };
 
   const handleGenerateCreative = async () => {
-    console.log('🎨 === GENERATE CREATIVE START ===');
+    console.log('=== GENERATE CREATIVE CLICKED ===');
     console.log('Idea ID:', idea.id);
-    console.log('Idea Content:', idea.content);
-    setLoading(true);
     
-    // Ensure minimum 2 seconds of spinner visibility
-    const minDelay = new Promise(resolve => setTimeout(resolve, 2000));
+    setLoading(true);
+    setGeneratingCreatives(true);
+    
+    // Create placeholders for 3 creatives immediately
+    const placeholders = [
+      { aspect_ratio: '16:9', loading: true },
+      { aspect_ratio: '9:16', loading: true },
+      { aspect_ratio: '1:1', loading: true }
+    ];
+    setCreativePlaceholders(placeholders);
+    console.log('✅ Placeholders set:', placeholders);
+    console.log('✅ generatingCreatives set to true');
+    
+    const creatives = [];
     
     try {
-      console.log('📡 Making API request to generate creatives...');
+      console.log('📤 Starting streaming request for creatives...');
       const response = await fetch(`http://localhost:8002/ideas/${idea.id}/generate-creative`, {
         method: 'POST',
       });
       
-      console.log('📊 Response status:', response.status);
-      console.log('📊 Response ok:', response.ok);
-      
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ API Error Response:', errorText);
-        throw new Error(`API returned ${response.status}: ${errorText}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
-      const creatives = await response.json(); // Now returns array of 3 creatives
-      console.log('✅ Generated creatives count:', creatives.length);
-      console.log('✅ Generated creatives:', creatives);
-      creatives.forEach((c, i) => {
-        console.log(`  Creative ${i + 1}: ${c.aspect_ratio} - ${c.file_path}`);
-      });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
       
-      // Wait for both the API call and minimum delay
-      await minDelay;
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          console.log('✅ === STREAM COMPLETE ===');
+          setLoading(false);
+          setGeneratingCreatives(false);
+          setCreativePlaceholders([]);
+          break;
+        }
+        
+        // Decode the chunk and add to buffer
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Process complete SSE messages (separated by \n\n)
+        const messages = buffer.split('\n\n');
+        buffer = messages.pop() || ''; // Keep incomplete message in buffer
+        
+        for (const message of messages) {
+          if (!message.trim()) continue;
+          
+          // Parse SSE format: "event: type\ndata: json"
+          const lines = message.split('\n');
+          let eventType = 'message';
+          let eventData = '';
+          
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.substring(7).trim();
+            } else if (line.startsWith('data: ')) {
+              eventData = line.substring(6).trim();
+            }
+          }
+          
+          if (!eventData) continue;
+          
+          try {
+            const data = JSON.parse(eventData);
+            
+            if (eventType === 'progress') {
+              console.log(`⏳ Progress: Generating ${data.aspect_ratio} (${data.current}/${data.total})...`);
+            } else if (eventType === 'creative') {
+              console.log(`✅ Creative received: ${data.aspect_ratio} - ${data.file_path}`);
+              creatives.push(data);
+              
+              // Update placeholder with actual creative
+              setCreativePlaceholders(prev => 
+                prev.map(p => 
+                  p.aspect_ratio === data.aspect_ratio 
+                    ? { ...data, loading: false }
+                    : p
+                )
+              );
+              
+              // Display creative immediately as it arrives
+              console.log('📤 Calling onGenerateCreative with new creative...');
+              onGenerateCreative([data]);
+            } else if (eventType === 'error') {
+              console.error(`❌ Error generating ${data.aspect_ratio}:`, data.error);
+            } else if (eventType === 'complete') {
+              console.log(`✅ Generation complete: ${data.total} creatives`);
+            }
+          } catch (parseError) {
+            console.error('❌ Failed to parse SSE data:', eventData, parseError);
+          }
+        }
+      }
       
-      console.log('📤 Calling onGenerateCreative callback...');
-      onGenerateCreative(creatives);
-      console.log('✅ === GENERATE CREATIVE COMPLETE ===');
     } catch (err) {
       console.error('❌ Failed to generate creative:', err);
       console.error('❌ Error details:', err.message);
-      await minDelay; // Still wait even on error
-      alert(`Failed to generate creatives: ${err.message}`);
-    } finally {
+      alert(`Failed to generate all creatives: ${err.message}`);
       setLoading(false);
+      setGeneratingCreatives(false);
+      setCreativePlaceholders([]);
     }
   };
 
@@ -121,10 +186,52 @@ export default function IdeaCard({ idea, onRegenerate, onGenerateCreative, onDel
           <p className="text-sm text-gray-500">Generating idea...</p>
         </div>
       ) : (
-        <p className={`mb-4 ${hasError ? 'text-red-700' : 'text-gray-700'}`}>{idea.content}</p>
+        <>
+          <p className={`mb-4 ${hasError ? 'text-red-700' : 'text-gray-700'}`}>{idea.content}</p>
+          
+          {/* Creative placeholders grid */}
+          {(() => {
+            console.log('Checking grid render:', { generatingCreatives, placeholderCount: creativePlaceholders.length });
+            return generatingCreatives && creativePlaceholders.length > 0;
+          })() && (
+            <div className="mb-4">
+              <p className="text-sm font-semibold text-gray-700 mb-2">Generating Creatives:</p>
+              <div className="grid grid-cols-3 gap-4">
+                {creativePlaceholders.map((placeholder, index) => (
+                  <div key={index} className="border rounded-lg p-3 bg-gray-50">
+                    <div className="text-xs font-semibold text-purple-800 bg-purple-100 px-2 py-1 rounded mb-2 inline-block">
+                      {placeholder.aspect_ratio}
+                    </div>
+                    {placeholder.loading ? (
+                      <div className="bg-gray-200 rounded mb-2 h-32 flex items-center justify-center">
+                        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                      </div>
+                    ) : (
+                      <div className="bg-gray-200 rounded mb-2 h-32 overflow-hidden flex items-center justify-center">
+                        <img
+                          src={`http://localhost:8002/${placeholder.file_path}?t=${Date.now()}`}
+                          alt={`Creative ${placeholder.aspect_ratio}`}
+                          className={`${
+                            placeholder.aspect_ratio === '16:9' ? 'w-full h-auto' :
+                            placeholder.aspect_ratio === '9:16' ? 'h-full w-auto' :
+                            'h-full w-auto'
+                          }`}
+                          crossOrigin="anonymous"
+                        />
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-600 text-center">
+                      {placeholder.loading ? 'Generating...' : '✓ Ready'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
       
-      {!isLoading && (
+      {!isLoading && !generatingCreatives && (
         <div className="flex gap-2">
           <button
             onClick={handleRegenerate}

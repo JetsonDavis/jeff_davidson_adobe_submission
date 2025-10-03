@@ -15,6 +15,7 @@ class FireflyService:
     
     def __init__(self):
         self.api_key = os.getenv("FIREFLY_API_KEY")
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.api_url = os.getenv("FIREFLY_API_URL", "https://firefly-api.adobe.io/v2/images/generate")
         self.timeout = 30.0
         self.output_dir = Path("uploads/creatives")
@@ -65,15 +66,17 @@ class FireflyService:
         """Get image provider and API key from settings"""
         from .key_service import key_service
         
-        # Check use_image_model first, then fall back to image_provider
+        # Get provider name from use_image_model key
         provider = key_service.get_value(db, "use_image_model") or key_service.get_value(db, "image_provider") or "Adobe Firefly"
         
         # For Adobe Firefly, we'll generate the access token on-demand
-        # For others, get API key using provider name as key
+        # For all others, get API key using provider name as the key in the keys table
         if provider == "Adobe Firefly":
             api_key = "GENERATE_ON_DEMAND"  # Placeholder, will be replaced
         else:
-            api_key = key_service.get_value(db, provider) or self.api_key
+            # Look up the API key using the provider name as the key
+            # e.g., if provider is "DALL-E", look up key="DALL-E" in keys table
+            api_key = key_service.get_value(db, provider)
         
         # Map provider to API URL
         provider_configs = {

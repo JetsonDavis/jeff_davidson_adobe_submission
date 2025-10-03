@@ -56,63 +56,98 @@ async def regenerate_idea(idea_id: uuid.UUID, db: Session = Depends(get_db)):
     return updated_idea
 
 
-@router.post("/{idea_id}/generate-creative", response_model=list[CreativeResponse], status_code=201)
+@router.post("/{idea_id}/generate-creative")
 async def generate_creative(idea_id: uuid.UUID, db: Session = Depends(get_db)):
     """
-    Generate final creative assets from idea using Adobe Firefly.
+    Generate final creative assets from idea using Adobe Firefly with streaming.
     Creates 3 versions: 16:9, 9:16, and 1:1 aspect ratios.
     Includes campaign message and brand colors in the generated images.
+    Streams each creative as it's generated using Server-Sent Events.
     """
-    # Get idea and brief
-    idea = idea_service.get_idea_or_404(db, idea_id)
-    brief = brief_service.get_brief_or_404(db, idea.brief_id)
+    from starlette.responses import StreamingResponse
+    import json
     
-    # Get brand colors and logo from assets (if any)
-    brand_assets = asset_service.list_assets(db, asset_type="brand")
-    brand_colors = None
-    brand_logo_path = None
-    if brand_assets:
-        # Use colors and logo from first brand asset
-        brand_colors = brand_assets[0].brand_colors
-        brand_logo_path = brand_assets[0].file_path
-    
-    # Generate creatives for all 3 aspect ratios
-    aspect_ratios = ["16:9", "9:16", "1:1"]
-    creatives = []
-    
-    for aspect_ratio in aspect_ratios:
-        try:
-            file_path, mime_type, file_size, firefly_job_id = await firefly_service.generate_creative(
-                db,
-                idea.content,
-                brief.campaign_message,
-                idea.region,
-                idea.demographic,
-                aspect_ratio,
-                brand_colors,
-                idea.language_code,  # Pass language for appropriate text
-                brief.brand,  # Pass brand name for logo generation
-                brand_logo_path  # Pass brand logo path for compositing
-            )
-        except Exception as e:
-            import traceback
-            error_details = f"Firefly generation failed for {aspect_ratio}: {str(e)}\n{traceback.format_exc()}"
-            print(error_details)  # Log to console
-            raise HTTPException(status_code=500, detail=error_details)
+    async def generate_creatives_stream():
+        """Generator that yields SSE events for each creative"""
+        # Get idea and brief
+        idea = idea_service.get_idea_or_404(db, idea_id)
+        brief = brief_service.get_brief_or_404(db, idea.brief_id)
         
-        # Create creative in database (also creates approval record)
-        creative = creative_service.create_creative(
-            db,
-            idea_id=idea.id,
-            file_path=file_path,
-            mime_type=mime_type,
-            file_size=file_size,
-            aspect_ratio=aspect_ratio,
-            firefly_job_id=firefly_job_id
-        )
-        creatives.append(creative)
+        # Get brand colors and logo from assets (if any)
+        brand_assets = asset_service.list_assets(db, asset_type="brand")
+        brand_colors = None
+        brand_logo_path = None
+        if brand_assets:
+            # Use colors and logo from first brand asset
+            brand_colors = brand_assets[0].brand_colors
+            brand_logo_path = brand_assets[0].file_path
+        
+        # Generate creatives for all 3 aspect ratios
+        aspect_ratios = ["16:9", "9:16", "1:1"]
+        
+        for i, aspect_ratio in enumerate(aspect_ratios):
+            try:
+                # Send progress event
+                yield f"event: progress\ndata: {json.dumps({'current': i + 1, 'total': 3, 'aspect_ratio': aspect_ratio})}\n\n"
+                
+                file_path, mime_type, file_size, firefly_job_id = await firefly_service.generate_creative(
+                    db,
+                    idea.content,
+                    brief.campaign_message,
+                    idea.region,
+                    idea.demographic,
+                    aspect_ratio,
+                    brand_colors,
+                    idea.language_code,  # Pass language for appropriate text
+                    brief.brand,  # Pass brand name for logo generation
+                    brand_logo_path  # Pass brand logo path for compositing
+                )
+                
+                # Create creative in database (also creates approval record)
+                creative = creative_service.create_creative(
+                    db,
+                    idea_id=idea.id,
+                    file_path=file_path,
+                    mime_type=mime_type,
+                    file_size=file_size,
+                    aspect_ratio=aspect_ratio,
+                    firefly_job_id=firefly_job_id
+                )
+                
+                # Send creative event with the generated creative
+                creative_data = {
+                    'id': str(creative.id),
+                    'idea_id': str(creative.idea_id),
+                    'file_path': creative.file_path,
+                    'mime_type': creative.mime_type,
+                    'file_size': creative.file_size,
+                    'aspect_ratio': creative.aspect_ratio,
+                    'firefly_job_id': creative.firefly_job_id,
+                    'region': idea.region,
+                    'demographic': idea.demographic,
+                    'created_at': creative.created_at.isoformat(),
+                    'updated_at': creative.updated_at.isoformat()
+                }
+                yield f"event: creative\ndata: {json.dumps(creative_data)}\n\n"
+                
+            except Exception as e:
+                import traceback
+                error_details = f"Firefly generation failed for {aspect_ratio}: {str(e)}\n{traceback.format_exc()}"
+                print(error_details)  # Log to console
+                yield f"event: error\ndata: {json.dumps({'error': str(e), 'aspect_ratio': aspect_ratio})}\n\n"
+        
+        # Send complete event
+        yield f"event: complete\ndata: {json.dumps({'total': len(aspect_ratios)})}\n\n"
     
-    return creatives
+    return StreamingResponse(
+        generate_creatives_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
 
 
 @router.post("/{idea_id}/duplicate", response_model=IdeaResponse, status_code=201)

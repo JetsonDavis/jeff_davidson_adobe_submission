@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Loader2, Trash2 } from 'lucide-react';
 import BriefUpload from './BriefUpload';
 import AssetUpload from './AssetUpload';
 import AssetThumbnail from './AssetThumbnail';
@@ -14,6 +14,7 @@ export default function CampaignTab({ tabId }) {
   const [loading, setLoading] = useState(false);
   const [isBriefValid, setIsBriefValid] = useState(false);
   const [isCreatingBrief, setIsCreatingBrief] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState({}); // Track progress per idea
   const briefSubmitRef = useRef(null);
 
   // Fetch assets when component mounts and clean up auto-generated ones
@@ -211,6 +212,17 @@ export default function CampaignTab({ tabId }) {
     console.log('Generating all creatives for', ideas.length, 'ideas');
     setLoading(true);
     
+    // Initialize progress for all ideas
+    const initialProgress = {};
+    ideas.forEach(idea => {
+      initialProgress[idea.id] = {
+        '16:9': { loading: true, data: null },
+        '9:16': { loading: true, data: null },
+        '1:1': { loading: true, data: null }
+      };
+    });
+    setGenerationProgress(initialProgress);
+    
     // Ensure minimum 2 seconds of spinner visibility
     const minDelay = new Promise(resolve => setTimeout(resolve, 2000));
     
@@ -218,13 +230,84 @@ export default function CampaignTab({ tabId }) {
       // Generate creatives for all ideas
       for (const idea of ideas) {
         console.log('Generating creative for idea:', idea.id);
+        
+        // Stream creatives and update UI as they arrive
         const response = await fetch(`http://localhost:8002/ideas/${idea.id}/generate-creative`, {
           method: 'POST',
         });
-        const result = await response.json();
-        console.log('Generated creative result:', result);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            console.log(`✅ Completed generating creatives for idea: ${idea.id}`);
+            break;
+          }
+          
+          // Decode the chunk and add to buffer
+          buffer += decoder.decode(value, { stream: true });
+          
+          // Process complete SSE messages (separated by \n\n)
+          const messages = buffer.split('\n\n');
+          buffer = messages.pop() || ''; // Keep incomplete message in buffer
+          
+          for (const message of messages) {
+            if (!message.trim()) continue;
+            
+            // Parse SSE format: "event: type\ndata: json"
+            const lines = message.split('\n');
+            let eventType = 'message';
+            let eventData = '';
+            
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                eventType = line.substring(7).trim();
+              } else if (line.startsWith('data: ')) {
+                eventData = line.substring(6).trim();
+              }
+            }
+            
+            if (!eventData) continue;
+            
+            try {
+              const data = JSON.parse(eventData);
+              
+              if (eventType === 'creative') {
+                console.log(`✅ Creative received: ${data.aspect_ratio}`, data);
+                console.log(`Updating progress for idea ${idea.id}, aspect ${data.aspect_ratio}`);
+                
+                // Update progress for this specific creative
+                setGenerationProgress(prev => {
+                  const updated = {
+                    ...prev,
+                    [idea.id]: {
+                      ...prev[idea.id],
+                      [data.aspect_ratio]: { loading: false, data }
+                    }
+                  };
+                  console.log('Updated progress state:', updated);
+                  return updated;
+                });
+                
+                // Immediately fetch and update creatives
+                await fetchCreatives();
+              }
+            } catch (parseError) {
+              console.error('❌ Failed to parse SSE data:', eventData, parseError);
+            }
+          }
+        }
       }
-      // Fetch all creatives after generation
+      
+      // Final fetch to ensure all creatives are displayed
       console.log('Fetching all creatives after generation');
       await fetchCreatives();
       
@@ -236,6 +319,7 @@ export default function CampaignTab({ tabId }) {
       alert('Error generating creatives. Check console for details.');
     } finally {
       setLoading(false);
+      setGenerationProgress({}); // Clear progress
     }
   };
 
@@ -253,6 +337,32 @@ export default function CampaignTab({ tabId }) {
 
   const handleIdeaDeleted = (ideaId) => {
     setIdeas(ideas.filter(i => i.id !== ideaId));
+  };
+
+  const handleDeleteAllCreatives = async () => {
+    if (!confirm(`Delete all ${creatives.length} creatives? This will remove all creative files from the filesystem.`)) {
+      return;
+    }
+
+    try {
+      console.log(`Deleting ${creatives.length} creatives...`);
+      
+      // Delete all creatives
+      const deletePromises = creatives.map(creative =>
+        fetch(`http://localhost:8002/creatives/${creative.id}`, {
+          method: 'DELETE',
+        })
+      );
+
+      await Promise.all(deletePromises);
+      console.log('✅ All creatives deleted');
+      
+      // Refresh creatives list
+      await fetchCreatives();
+    } catch (err) {
+      console.error('Failed to delete all creatives:', err);
+      alert('Failed to delete some creatives. Check console for details.');
+    }
   };
 
   return (
@@ -363,6 +473,7 @@ export default function CampaignTab({ tabId }) {
                 {loading ? 'Generating...' : 'Generate All'}
               </button>
             </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {ideas.map(idea => (
                 <IdeaCard 
@@ -378,10 +489,80 @@ export default function CampaignTab({ tabId }) {
         )}
 
         {/* Approval Queue Section */}
-        {creatives.length > 0 ? (
+        {creatives.length > 0 || Object.keys(generationProgress).length > 0 ? (
           <section>
-            <h2 className="text-2xl font-bold mb-4">Approval Queue ({creatives.length} creatives)</h2>
-            <ApprovalQueue creatives={creatives} onCreativeUpdate={fetchCreatives} />
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-bold">
+                {Object.keys(generationProgress).length > 0 
+                  ? '🎨 Generating Creatives...' 
+                  : `Approval Queue (${creatives.length} creatives)`}
+              </h2>
+              {creatives.length > 0 && (
+                <button
+                  onClick={handleDeleteAllCreatives}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete All
+                </button>
+              )}
+            </div>
+            
+            {/* Show EITHER progress grid OR approval queue, not both */}
+            {Object.keys(generationProgress).length > 0 ? (
+              // Generation Progress Grid (while generating)
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {ideas.map(idea => {
+                    const progress = generationProgress[idea.id];
+                    if (!progress) return null;
+                    
+                    return (
+                      <div key={idea.id} className="bg-white rounded-lg p-3 border border-blue-200">
+                        <div className="flex gap-1 mb-2">
+                          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">{idea.region}</span>
+                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">{idea.demographic}</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {['16:9', '9:16', '1:1'].map(aspectRatio => {
+                            const aspectProgress = progress[aspectRatio];
+                            
+                            return (
+                              <div key={aspectRatio} className="text-center">
+                                <div className="text-xs font-semibold text-purple-800 bg-purple-100 px-1 py-0.5 rounded mb-1">
+                                  {aspectRatio}
+                                </div>
+                                {aspectProgress.loading ? (
+                                  <div className="bg-gray-200 rounded h-16 flex items-center justify-center">
+                                    <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
+                                  </div>
+                                ) : (
+                                  <div className="bg-green-100 rounded h-16 overflow-hidden flex items-center justify-center">
+                                    <img
+                                      src={`http://localhost:8002/${aspectProgress.data.file_path}?t=${Date.now()}`}
+                                      alt={aspectRatio}
+                                      className="max-h-full max-w-full object-contain"
+                                    />
+                                  </div>
+                                )}
+                                <p className="text-xs text-gray-600 mt-1">
+                                  {aspectProgress.loading ? '⏳' : '✓'}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              // Approval Queue (after generation complete)
+              creatives.length > 0 && (
+                <ApprovalQueue creatives={creatives} onCreativeUpdate={fetchCreatives} />
+              )
+            )}
           </section>
         ) : (
           <section>

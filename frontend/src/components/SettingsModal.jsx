@@ -89,6 +89,52 @@ export default function SettingsModal({ isOpen, onClose }) {
     }
   };
 
+  const handleLlmProviderChange = async (newProvider) => {
+    setLlmProvider(newProvider);
+    
+    // Fetch the API key for this provider from database
+    try {
+      const response = await fetch('http://localhost:8002/settings');
+      const data = await response.json();
+      const savedSettings = data.settings;
+      
+      // Look up key by provider name
+      if (savedSettings[newProvider]) {
+        setLlmApiKey(savedSettings[newProvider]);
+        console.log(`✅ Found API key for ${newProvider}`);
+      } else {
+        setLlmApiKey('');
+        console.log(`❌ No API key found for ${newProvider}`);
+      }
+    } catch (err) {
+      console.error('Failed to fetch API key:', err);
+      setLlmApiKey('');
+    }
+  };
+
+  const handleImageProviderChange = async (newProvider) => {
+    setImageProvider(newProvider);
+    
+    // Fetch the API key for this provider from database
+    try {
+      const response = await fetch('http://localhost:8002/settings');
+      const data = await response.json();
+      const savedSettings = data.settings;
+      
+      // Look up key by provider name
+      if (savedSettings[newProvider]) {
+        setImageApiKey(savedSettings[newProvider]);
+        console.log(`✅ Found API key for ${newProvider}`);
+      } else {
+        setImageApiKey('');
+        console.log(`❌ No API key found for ${newProvider}`);
+      }
+    } catch (err) {
+      console.error('Failed to fetch API key:', err);
+      setImageApiKey('');
+    }
+  };
+
   if (!isOpen) return null;
 
   const handleChange = (platform, field, value) => {
@@ -186,7 +232,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                   </label>
                   <select
                     value={llmProvider}
-                    onChange={(e) => setLlmProvider(e.target.value)}
+                    onChange={(e) => handleLlmProviderChange(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option>OpenAI</option>
@@ -229,7 +275,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                   </label>
                   <select
                     value={imageProvider}
-                    onChange={(e) => setImageProvider(e.target.value)}
+                    onChange={(e) => handleImageProviderChange(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option>Adobe Firefly</option>
