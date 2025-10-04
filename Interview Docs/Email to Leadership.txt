@@ -1,0 +1,23 @@
+EMAIL:
+
+To: 	Ad Service Automation Leadership Team
+
+From:  	Jeff Davidson, Project Lead
+
+Re: 	Delivery Schedule
+
+Hi ____, ______, and _____,
+
+I wanted to let you know that I just received some news that will unfortunately impact the scheduled delivery date for the Ad Service Automation project.
+
+Joe Schmoe in legal informed me that the licensing agreement between Adobe and OpenAI in regard to the scope of our licenses have hit a small speed bump and the deal between our two companies will not be signed in time for us to meet the projected launch date.  Joe expects the issues to be resolved by the end of the month, adding one to two weeks to our schedule.
+
+The good news is that the tech is 100% complete, tested, and deployed to our servers.  The minute we get the go-ahead from legal, we will be able to launch the product.  All stakeholders in the project including marketing, IT, Ad Operations, Creative, and Compliance have been notified and are in the process of adjusting their schedules and making contingency plans.
+
+Luckily, this will still allow us the time we need to get feedback from internal users and make one or two rounds of revisions before the end of the year.
+
+Please feel free to reach out to me or Joe for any additional details, comments, or concerns.  
+
+Best,
+
+Jeff

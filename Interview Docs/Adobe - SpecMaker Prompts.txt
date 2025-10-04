@@ -1,0 +1,11 @@
+/specify i am building a dashboard for a marketing system that will generate posts for social media to promote multiple products from the same brand.  the dashboard will have an input box that will accept product briefs for each product.  In lieu of requiring the user to type the brief, the site will also accept txt, pdf, or ms word docs via an upload button.   there will also be upload areas for brand assets in jpg format and for product assets (i.e. pictures of the products).  there should be a display of thumbnails of each type of asset with an icon embedded in the thumbnail to delete the asset from the site.  Each uploaded brief will need to have an Execute button that will send the brief and associated assets to an LLM that will generate one idea for each region and demographic specified in the brief.  there should be two buttons nedxt to each idea - one with chasing arrows logo to regenerate a new idea and another with a play button.  the play button will generate the creative for each idea, region, and demographic by sending the brief to adobe firefly for rendering.  each final image will be put in a visual queue with buttons for regenerate, creative approval, regional approval.  once the creative and regional approval is given, a deploy button will become active.  when clicked, the image will have a banner below it that says deployed.
+
+please add this:  this brief will contain a campaign message that should be included in the final image asset in the language for the region.  if space allows, also include the brand logo or at least highlights in the brand colors which are gleened from the logo
+
+/plan we are going to create the backend code with python and fastapi framework running on port 8002 and the front end with react running on port 3001.  there will be a postgresql db called adobe running on port 5432.  make sure to create all required db migrations.  for the time being, this code will only run locally, so store uploaded assets in the local file system
+
+/tasks
+
+/implement
+
+
